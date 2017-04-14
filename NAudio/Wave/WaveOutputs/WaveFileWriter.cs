@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using NAudio.Wave.SampleProviders;
+using NAudio.Wave.WaveStreams;
 
 namespace NAudio.Wave
 {
@@ -61,7 +62,7 @@ namespace NAudio.Wave
         /// </summary>
         /// <param name="outStream">Stream to be written to</param>
         /// <param name="format">Wave format to use</param>
-        public WaveFileWriter(Stream outStream, WaveFormat format)
+        public WaveFileWriter(Stream outStream, WaveFormat format, BextChunkInfo bextChunkInfo = null)
         {
             this.outStream = outStream;
             this.format = format;
@@ -69,6 +70,11 @@ namespace NAudio.Wave
             this.writer.Write(System.Text.Encoding.UTF8.GetBytes("RIFF"));
             this.writer.Write((int)0); // placeholder
             this.writer.Write(System.Text.Encoding.UTF8.GetBytes("WAVE"));
+
+            if (bextChunkInfo != null)
+            {
+                WriteBextChunk(bextChunkInfo);
+            }
 
             this.writer.Write(System.Text.Encoding.UTF8.GetBytes("fmt "));
             format.Serialize(this.writer);
@@ -86,6 +92,39 @@ namespace NAudio.Wave
             : this(new FileStream(filename, FileMode.Create, FileAccess.Write, FileShare.Read), format)
         {
             this.filename = filename;
+        }
+
+        private void WriteBextChunk(BextChunkInfo bextChunkInfo)
+        {
+
+            // write the broadcast audio extension
+            writer.Write(System.Text.Encoding.UTF8.GetBytes("bext"));
+            var codingHistory = System.Text.Encoding.ASCII.GetBytes(bextChunkInfo.CodingHistory ?? "");
+            var bextLength = 602 + codingHistory.Length;
+            if (bextLength % 2 != 0)
+                bextLength++;
+            writer.Write(bextLength); // bext size
+            var bextStart = writer.BaseStream.Position;
+            writer.Write(GetAsBytes(bextChunkInfo.Description, 256));
+            writer.Write(GetAsBytes(bextChunkInfo.Originator, 32));
+            writer.Write(GetAsBytes(bextChunkInfo.OriginatorReference, 32));
+            writer.Write(GetAsBytes(bextChunkInfo.OriginationDate, 10));
+            writer.Write(GetAsBytes(bextChunkInfo.OriginationTime, 8));
+            writer.Write(bextChunkInfo.TimeReference); // 8 bytes long
+            writer.Write(bextChunkInfo.Version); // 2 bytes long
+            writer.Write(GetAsBytes(bextChunkInfo.UniqueMaterialIdentifier, 64));
+            writer.Write(bextChunkInfo.Reserved); // for version 1 this is 190 bytes
+            writer.Write(codingHistory);
+            if (codingHistory.Length % 2 != 0)
+                writer.Write((byte)0);
+        }
+
+        private static byte[] GetAsBytes(string message, int byteSize)
+        {
+            var outputBuffer = new byte[byteSize];
+            var encoded = System.Text.Encoding.ASCII.GetBytes(message ?? "");
+            Array.Copy(encoded, outputBuffer, Math.Min(encoded.Length, byteSize));
+            return outputBuffer;
         }
 
         private void WriteDataChunkHeader()
